@@ -16,6 +16,7 @@ import {
 import { validationResult } from "express-validator";
 import { getPDFReadableStream } from "../../lib/pdf-tools.js";
 import { pipeline } from "stream";
+import fetch from "node-fetch";
 
 const netflixRouter = express.Router();
 
@@ -49,6 +50,25 @@ netflixRouter.get("/", async (req, res, next) => {
   try {
     const reviews = await getReviews();
     const media = await getMedia();
+    if (req.query && req.query.title) {
+      const filteredMedia = media.filter(
+        (movie) => movie.Title === req.query.title
+      );
+      if (filteredMedia.length === 0) {
+        console.log(req.query.title);
+        const searchTitle = req.query.title;
+        const response = await fetch(
+          `https://www.omdbapi.com/?t=${searchTitle}&apikey=${process.env.OMDB_API_KEY}`
+        );
+        const data = await response.json();
+        media.push(data);
+        await writeMedia(media);
+        console.log(media);
+      } else {
+        res.send(filteredMedia);
+      }
+    } else {
+    }
 
     const allTogether = [{ media: [...media] }, { reviews: [...reviews] }];
     res.send(allTogether);
@@ -57,12 +77,27 @@ netflixRouter.get("/", async (req, res, next) => {
   }
 });
 
-// if (req.query && req.query.title) {
-//     const filteredMedia = media.filter(
-//       (movie) => movie.Title === req.query.title
-//     );
-//     res.send(filteredMedia);
-//   } else {}
+//  SEARCH
+// netflixRouter.get("/", async (req, res, next) => {
+//   try {
+//     const media = await getMedia();
+//     if (req.query && req.query.title) {
+//       console.log(req.query.title);
+//       const filteredMedia = media.filter(
+//         (movie) => movie.Title === req.query.title
+//       );
+//       res.send(filteredMedia);
+//     } else {
+//       const response = await fetch(
+//         `https://www.omdbapi.com/?t=lord+of+the+rings&${process.env.OMDB_API_KEY}}`
+//       );
+//       const data = await response.json();
+//       console.log(data);
+//     }
+//   } catch (err) {
+//     next(err);
+//   }
+// });
 
 // GET ONE
 netflixRouter.get("/:imdbID", async (req, res, next) => {
