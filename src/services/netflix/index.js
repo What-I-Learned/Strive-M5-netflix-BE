@@ -20,6 +20,11 @@ import fetch from "node-fetch";
 
 const netflixRouter = express.Router();
 
+const searchMiddleware = async (req, res, next) => {
+  console.log(req.query.title);
+  next(); // MANDATORY!!!! I need to execute this function to give the control to what is coming next (either another middleware or the request handler)
+};
+
 //=============MEDIA
 
 // CREATE
@@ -46,58 +51,50 @@ netflixRouter.post("/", addMediaItemValidation, async (req, res, next) => {
 });
 
 // GET ALL
-netflixRouter.get("/", async (req, res, next) => {
+netflixRouter.get("/", searchMiddleware, async (req, res, next) => {
   try {
     const reviews = await getReviews();
     const media = await getMedia();
     if (req.query && req.query.title) {
-      const filteredMedia = media.filter(
-        (movie) => movie.Title === req.query.title
+      const searchTitle = req.query.title;
+      console.log(media.length);
+      const filteredMedia = media.filter((m) =>
+        m.Title.toLowerCase().includes(searchTitle)
       );
-      if (filteredMedia.length === 0) {
+
+      console.log(filteredMedia.length);
+      if (filteredMedia.length !== 0) {
         console.log(req.query.title);
-        const searchTitle = req.query.title;
-        const response = await fetch(
-          `https://www.omdbapi.com/?t=${searchTitle}&apikey=${process.env.OMDB_API_KEY}`
-        );
-        const data = await response.json();
-        media.push(data);
-        await writeMedia(media);
-        console.log(media);
-      } else {
         res.send(filteredMedia);
+      } else {
+        try {
+          const response = await fetch(
+            `https://www.omdbapi.com/?t=${searchTitle}&apikey=${process.env.OMDB_API_KEY}`
+          );
+          if (response.ok) {
+            const data = await response.json();
+            if (data.Response === "False") {
+              res.send(data);
+            } else {
+              const { Title, Year, Type, Poster, imdbID } = data;
+              const newData = { Title, Year, Type, Poster, imdbID };
+              media.push(newData);
+              await writeMedia(media);
+              res.send(newData);
+            }
+          }
+        } catch (err) {
+          next(err);
+        }
       }
     } else {
+      const allTogether = { media: media, reviews: reviews };
+      res.send(allTogether);
     }
-
-    const allTogether = [{ media: [...media] }, { reviews: [...reviews] }];
-    res.send(allTogether);
   } catch (err) {
     next(err);
   }
 });
-
-//  SEARCH
-// netflixRouter.get("/", async (req, res, next) => {
-//   try {
-//     const media = await getMedia();
-//     if (req.query && req.query.title) {
-//       console.log(req.query.title);
-//       const filteredMedia = media.filter(
-//         (movie) => movie.Title === req.query.title
-//       );
-//       res.send(filteredMedia);
-//     } else {
-//       const response = await fetch(
-//         `https://www.omdbapi.com/?t=lord+of+the+rings&${process.env.OMDB_API_KEY}}`
-//       );
-//       const data = await response.json();
-//       console.log(data);
-//     }
-//   } catch (err) {
-//     next(err);
-//   }
-// });
 
 // GET ONE
 netflixRouter.get("/:imdbID", async (req, res, next) => {
@@ -111,10 +108,7 @@ netflixRouter.get("/:imdbID", async (req, res, next) => {
       const mediaItemReviews = reviews.filter(
         (r) => r.elementId === mediaItem.imdbID
       );
-      const allTogether = [
-        { mediaItem: mediaItem },
-        { comments: [...mediaItemReviews] },
-      ];
+      const allTogether = { mediaItem, mediaItemReviews };
       const { Poster, Title } = mediaItem;
       console.log(Title);
       res.send(allTogether);
