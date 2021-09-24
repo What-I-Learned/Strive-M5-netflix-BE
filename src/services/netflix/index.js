@@ -1,6 +1,4 @@
 import express from "express";
-import multer from "multer";
-import createError from "http-errors";
 import uniqid from "uniqid";
 import {
   getMedia,
@@ -9,21 +7,40 @@ import {
   writeReviews,
 } from "../../lib/fs-tools.js";
 import createHttpError from "http-errors";
+import { imageUpload } from "../../lib/multerTools.js";
+import { fileIsRequired } from "../../middlewares/fileIsRequired.js";
+import {
+  addMediaItemValidation,
+  addReviewValidation,
+} from "../../middlewares/validation/validators.js";
+import { validationResult } from "express-validator";
+import { getPDFReadableStream } from "../../lib/pdf-tools.js";
+import { pipeline } from "stream";
 
 const netflixRouter = express.Router();
 
 //=============MEDIA
 
 // CREATE
-netflixRouter.post("/", async (req, res, next) => {
+netflixRouter.post("/", addMediaItemValidation, async (req, res, next) => {
   try {
-    const newMedia = { imdbID: uniqid(), ...req.body };
-    const media = await getMedia();
-    media.push(newMedia);
-    await writeMedia(media);
-    res.status(201).send({ imdbID: newMedia.imdbID });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      next(
+        createHttpError(400, {
+          message: "Add new Media Item validation has failed",
+          errors: errors.array(),
+        })
+      );
+    } else {
+      const newMedia = { imdbID: uniqid(), ...req.body };
+      const media = await getMedia();
+      media.push(newMedia);
+      await writeMedia(media);
+      res.status(201).send({ imdbID: newMedia.imdbID });
+    }
   } catch (err) {
-    next(createError(400, err.message));
+    next(createHttpError(400, err.message));
   }
 });
 
@@ -38,7 +55,7 @@ netflixRouter.get("/", async (req, res, next) => {
       );
       res.send(filteredMedia);
     } else {
-      const allTogether = { media, reviews };
+      const allTogether = [{ media: [...media] }, { reviews: [...reviews] }];
       res.send(allTogether);
     }
   } catch (err) {
@@ -50,13 +67,20 @@ netflixRouter.get("/", async (req, res, next) => {
 netflixRouter.get("/:imdbID", async (req, res, next) => {
   try {
     const media = await getMedia();
-    const reviews = await getReviews();
+
     const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
-    const mediaItemReviews = reviews.filter(
-      (r) => r.elementId === mediaItem.imdbID
-    );
+
     if (mediaItem) {
-      const allTogether = { mediaItem, mediaItemReviews };
+      const reviews = await getReviews();
+      const mediaItemReviews = reviews.filter(
+        (r) => r.elementId === mediaItem.imdbID
+      );
+      const allTogether = [
+        { mediaItem: mediaItem },
+        { comments: [...mediaItemReviews] },
+      ];
+      const { Poster, Title } = mediaItem;
+      console.log(Title);
       res.send(allTogether);
     } else {
       next(
@@ -72,31 +96,47 @@ netflixRouter.get("/:imdbID", async (req, res, next) => {
 });
 
 // EDIT ONE
-netflixRouter.put("/:imdbID", async (req, res, next) => {
-  try {
-    const media = await getMedia();
-    const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
+netflixRouter.put(
+  "/:imdbID",
+  addMediaItemValidation,
+  async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        next(
+          createHttpError(400, {
+            message: "Edit Media Item validation has failed",
+            errors: errors.array(),
+          })
+        );
+      } else {
+        const media = await getMedia();
+        const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
 
-    if (!mediaItem) {
-      next(
-        createHttpError(
-          404,
-          `Media Item with id: ${req.params.imdbID} not found`
-        )
-      );
-    } else {
-      const mediaIndex = media.findIndex((m) => m.imdbID === req.params.imdbID);
-      const mediaToModify = media[mediaIndex];
-      const updatedFields = req.body;
-      const updateMedia = { ...mediaToModify, ...updatedFields };
-      media[mediaIndex] = updateMedia;
-      await writeMedia(media);
-      res.send(updateMedia);
+        if (!mediaItem) {
+          next(
+            createHttpError(
+              404,
+              `Media Item with id: ${req.params.imdbID} not found`
+            )
+          );
+        } else {
+          const mediaIndex = media.findIndex(
+            (m) => m.imdbID === req.params.imdbID
+          );
+          const mediaToModify = media[mediaIndex];
+          const updatedFields = req.body;
+          const updateMedia = { ...mediaToModify, ...updatedFields };
+          media[mediaIndex] = updateMedia;
+          await writeMedia(media);
+          res.send(updateMedia);
+        }
+      }
+    } catch (err) {
+      next(err);
     }
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 // DELETE ONE
 netflixRouter.delete("/:imdbID", async (req, res, next) => {
@@ -125,33 +165,47 @@ netflixRouter.delete("/:imdbID", async (req, res, next) => {
 // ============REVIEWS
 
 // POST
-netflixRouter.post("/:imdbID/reviews", async (req, res, next) => {
-  try {
-    const media = await getMedia();
-    const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
-    if (!mediaItem) {
-      next(
-        createHttpError(
-          404,
-          `Media Item with id: ${req.params.imdbID} not found`
-        )
-      );
-    } else {
-      const newReview = {
-        _id: uniqid(),
-        ...req.body,
-        elementId: mediaItem.imdbID,
-        createdAt: new Date(),
-      };
-      const reviews = await getReviews();
-      reviews.push(newReview);
-      await writeReviews(reviews);
-      res.status(201).send({ id: newReview._id });
+netflixRouter.post(
+  "/:imdbID/reviews",
+  addReviewValidation,
+  async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        next(
+          createHttpError(400, {
+            message: "Add new Review validation has failed",
+            errors: errors.array(),
+          })
+        );
+      } else {
+        const media = await getMedia();
+        const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
+        if (!mediaItem) {
+          next(
+            createHttpError(
+              404,
+              `Media Item with id: ${req.params.imdbID} not found`
+            )
+          );
+        } else {
+          const newReview = {
+            _id: uniqid(),
+            ...req.body,
+            elementId: mediaItem.imdbID,
+            createdAt: new Date(),
+          };
+          const reviews = await getReviews();
+          reviews.push(newReview);
+          await writeReviews(reviews);
+          res.status(201).send({ id: newReview._id });
+        }
+      }
+    } catch (err) {
+      next(err);
     }
-  } catch (err) {
-    next(err);
   }
-});
+);
 // DELETE
 netflixRouter.delete("/:imdbID/reviews/:reviewID", async (req, res, next) => {
   try {
@@ -175,6 +229,71 @@ netflixRouter.delete("/:imdbID/reviews/:reviewID", async (req, res, next) => {
 
 // ==============POSTER
 // POST POSTER
-netflixRouter.post("/:imdbID/poster");
+netflixRouter.post(
+  "/:imdbID/poster",
+  imageUpload.single("poster"),
+  fileIsRequired,
+  async (req, res, next) => {
+    try {
+      if (!errors.isEmpty()) {
+        next(
+          createHttpError(400, {
+            message: "Add new Media Item validation has failed",
+            errors: errors.array(),
+          })
+        );
+      } else {
+        const media = await getMedia();
+        const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
+        if (!mediaItem) {
+          next(
+            createHttpError(
+              404,
+              `Media with id: ${req.params.imdbID} not found`
+            )
+          );
+        } else {
+          mediaItem["Poster"] = req.file.path;
+          await writeMedia(media);
+          res.send("image uploaded on cloudinary");
+        }
+      }
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// ==============PDF
+// GET PDF
+netflixRouter.get("/:imdbID/pdf", async (req, res, next) => {
+  try {
+    const media = await getMedia();
+
+    const mediaItem = media.find((m) => m.imdbID === req.params.imdbID);
+    if (mediaItem) {
+      const reviews = await getReviews();
+      const mediaItemReviews = reviews.filter(
+        (r) => r.elementId === mediaItem.imdbID
+      );
+      const source = await getPDFReadableStream(mediaItem, mediaItemReviews);
+      res.setHeader("Content-Type", "application/pdf");
+      const destination = res;
+
+      pipeline(source, destination, (err) => {
+        if (err) next(err);
+      });
+    } else {
+      next(
+        createHttpError(
+          404,
+          "Media Item with id " + req.params.imdbID + " was not found"
+        )
+      );
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default netflixRouter;

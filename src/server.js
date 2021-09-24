@@ -17,7 +17,7 @@ const port = process.env.PORT || 3001;
 
 // *********************** CORS *****************************
 
-const whitelist = [process.env.FE_DEV_URL]; // we are allowing local FE and the deployed FE to access to our API
+const whitelist = [process.env.FE_DEV_URL, process.env.CLOUDINARY_URL]; // we are allowing local FE and the deployed FE to access to our API
 
 console.log(whitelist);
 
