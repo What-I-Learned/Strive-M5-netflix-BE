@@ -1,3 +1,7 @@
 PORT=port number
 FE_DEV_URL=frontend local url
 FE_PROD_URL=frontend cloud url
+
+
+OMDB_API_KEY = omdb_api_key
+CLOUDINARY_URL=cloudnary_url

@@ -49,19 +49,20 @@ netflixRouter.get("/", async (req, res, next) => {
   try {
     const reviews = await getReviews();
     const media = await getMedia();
-    if (req.query && req.query.title) {
-      const filteredMedia = media.filter(
-        (movie) => movie.Title === req.query.title
-      );
-      res.send(filteredMedia);
-    } else {
-      const allTogether = [{ media: [...media] }, { reviews: [...reviews] }];
-      res.send(allTogether);
-    }
+
+    const allTogether = [{ media: [...media] }, { reviews: [...reviews] }];
+    res.send(allTogether);
   } catch (err) {
     next(err);
   }
 });
+
+// if (req.query && req.query.title) {
+//     const filteredMedia = media.filter(
+//       (movie) => movie.Title === req.query.title
+//     );
+//     res.send(filteredMedia);
+//   } else {}
 
 // GET ONE
 netflixRouter.get("/:imdbID", async (req, res, next) => {
